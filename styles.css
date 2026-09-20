@@ -196,6 +196,10 @@ button:active {
   gap: 6px;
 }
 
+.live-stat {
+  display: none;
+}
+
 .summary-card.highlight {
   background: linear-gradient(135deg, rgba(94, 234, 212, 0.14), rgba(59, 130, 246, 0.08));
   border-color: rgba(94, 234, 212, 0.25);
@@ -256,6 +260,34 @@ button:active {
 .wrong-words-list {
   display: grid;
   gap: 10px;
+}
+
+.comparison-paragraph {
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.comparison-correct {
+  color: var(--success);
+}
+
+.comparison-wrong {
+  color: #fecaca;
+  background: var(--danger-soft);
+  border-radius: 4px;
+  padding: 1px 3px;
+}
+
+.comparison-expected {
+  color: var(--warning);
 }
 
 .word-row {
