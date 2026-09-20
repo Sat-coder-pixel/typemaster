@@ -20,7 +20,6 @@ const correctChars = document.getElementById('correctChars');
 const wrongChars = document.getElementById('wrongChars');
 const resultTime = document.getElementById('resultTime');
 const comparisonList = document.getElementById('comparisonList');
-const wrongWordsList = document.getElementById('wrongWordsList');
 
 const state = {
   refText: '',
@@ -29,7 +28,10 @@ const state = {
   startTime: null,
   intervalId: null,
   elapsedSeconds: 0,
+  backspaceCount: 0,
 };
+
+const TEST_DURATION_SECONDS = 10 * 60;
 
 function formatTime(totalSeconds) {
   const mins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
@@ -41,8 +43,12 @@ function startTimer() {
   state.startTime = Date.now();
   state.intervalId = setInterval(() => {
     state.elapsedSeconds = Math.max(0, Math.floor((Date.now() - state.startTime) / 1000));
-    timeValue.textContent = formatTime(state.elapsedSeconds);
-    updateLiveStats();
+    const remainingSeconds = Math.max(0, TEST_DURATION_SECONDS - state.elapsedSeconds);
+    timeValue.textContent = formatTime(remainingSeconds);
+
+    if (remainingSeconds === 0) {
+      finishTest();
+    }
   }, 250);
 }
 
@@ -57,25 +63,87 @@ function normalizeParagraph(text) {
   return text.replace(/\r\n/g, '\n');
 }
 
-function getWordPairs(referenceText, typedText) {
-  const referenceWords = referenceText.split(/\s+/).filter(Boolean);
-  const typedWords = typedText.split(/\s+/).filter(Boolean);
-  const maxWords = Math.max(referenceWords.length, typedWords.length);
-  const rows = [];
+function getWords(text) {
+  return [...text.matchAll(/\S+/g)].map((match) => match[0]);
+}
 
-  for (let i = 0; i < maxWords; i++) {
-    const expected = referenceWords[i] ?? '';
-    const actual = typedWords[i] ?? '';
-    const isCorrect = expected === actual && expected !== '';
-    rows.push({
-      index: i + 1,
-      expected,
-      actual,
-      isCorrect,
-    });
+function alignWords(referenceText, typedText) {
+  const referenceWords = getWords(referenceText);
+  const typedWords = getWords(typedText);
+  const rows = Array.from({ length: referenceWords.length + 1 }, () => (
+    Array(typedWords.length + 1).fill(null)
+  ));
+
+  rows[referenceWords.length][typedWords.length] = { cost: 0, action: null };
+
+  for (let referenceIndex = referenceWords.length; referenceIndex >= 0; referenceIndex--) {
+    for (let typedIndex = typedWords.length; typedIndex >= 0; typedIndex--) {
+      if (referenceIndex === referenceWords.length && typedIndex === typedWords.length) {
+        continue;
+      }
+
+      const choices = [];
+      const addChoice = (cost, action, priority) => {
+        choices.push({ cost, action, priority });
+      };
+
+      if (referenceIndex < referenceWords.length && typedIndex < typedWords.length) {
+        const isMatch = referenceWords[referenceIndex] === typedWords[typedIndex];
+        addChoice(rows[referenceIndex + 1][typedIndex + 1].cost + (isMatch ? 0 : 1), isMatch ? 'match' : 'replace', isMatch ? 0 : 3);
+
+        if (
+          referenceIndex + 1 < referenceWords.length &&
+          typedWords[typedIndex] === referenceWords[referenceIndex] + referenceWords[referenceIndex + 1]
+        ) {
+          addChoice(rows[referenceIndex + 2][typedIndex + 1].cost + 1, 'merge', 1);
+        }
+      }
+
+      if (referenceIndex < referenceWords.length) {
+        addChoice(rows[referenceIndex + 1][typedIndex].cost + 1, 'omit', 4);
+      }
+
+      if (typedIndex < typedWords.length) {
+        addChoice(rows[referenceIndex][typedIndex + 1].cost + 1, 'add', 5);
+      }
+
+      choices.sort((left, right) => left.cost - right.cost || left.priority - right.priority);
+      rows[referenceIndex][typedIndex] = choices[0];
+    }
   }
 
-  return rows;
+  const operations = [];
+  let referenceIndex = 0;
+  let typedIndex = 0;
+
+  while (referenceIndex < referenceWords.length || typedIndex < typedWords.length) {
+    const operation = rows[referenceIndex][typedIndex].action;
+    const operationData = { type: operation, referenceIndex, typedIndex };
+
+    if (operation === 'merge') {
+      operationData.expected = `${referenceWords[referenceIndex]} ${referenceWords[referenceIndex + 1]}`;
+      operationData.actual = typedWords[typedIndex];
+      referenceIndex += 2;
+      typedIndex++;
+    } else if (operation === 'match' || operation === 'replace') {
+      operationData.expected = referenceWords[referenceIndex];
+      operationData.actual = typedWords[typedIndex];
+      referenceIndex++;
+      typedIndex++;
+    } else if (operation === 'omit') {
+      operationData.expected = referenceWords[referenceIndex];
+      operationData.actual = '';
+      referenceIndex++;
+    } else {
+      operationData.expected = '';
+      operationData.actual = typedWords[typedIndex];
+      typedIndex++;
+    }
+
+    operations.push(operationData);
+  }
+
+  return { operations, referenceWords, typedWords };
 }
 
 function getAdjustedWpm(realWpm) {
@@ -85,23 +153,8 @@ function getAdjustedWpm(realWpm) {
 function calculateStats() {
   const referenceText = state.refText;
   const typedText = typingInput.value;
-  const referenceChars = referenceText.split('');
-  const typedChars = typedText.split('');
-  const maxLength = Math.max(referenceChars.length, typedChars.length);
-
-  let correctCharsCount = 0;
-  let wrongCharsCount = 0;
-
-  for (let i = 0; i < maxLength; i++) {
-    const expected = referenceChars[i] ?? '';
-    const actual = typedChars[i] ?? '';
-
-    if (actual === expected) {
-      correctCharsCount++;
-    } else if (actual !== '') {
-      wrongCharsCount++;
-    }
-  }
+  const comparison = getComparison(referenceText, typedText);
+  const { correctCharsCount, mistakes } = comparison;
 
   const typedLength = typedText.length;
   const accuracy = typedLength > 0 ? ((correctCharsCount / typedLength) * 100) : 0;
@@ -110,25 +163,58 @@ function calculateStats() {
   const netWpm = correctCharsCount > 0 ? (correctCharsCount / 5) / elapsedMinutes : 0;
   const adjustedWpm = getAdjustedWpm(netWpm);
 
-  const wrongWordRows = getWordPairs(referenceText, typedText).filter((row) => !row.isCorrect);
-
   return {
     correctCharsCount,
-    wrongCharsCount,
+    wrongCharsCount: mistakes,
     accuracy,
     grossWpm,
     netWpm,
     adjustedWpm,
-    wrongWordRows,
+    mistakes,
     typedLength,
   };
 }
 
+function getComparison(referenceText, typedText) {
+  const alignment = alignWords(referenceText, typedText);
+  let mistakes = 0;
+  let correctCharsCount = 0;
+  let wrongCharsCount = 0;
+
+  alignment.operations.forEach((operation) => {
+    if (operation.type === 'match') {
+      correctCharsCount += operation.actual.length;
+    } else {
+      mistakes++;
+      wrongCharsCount += operation.actual.length;
+    }
+  });
+
+  for (let index = 1; index < alignment.operations.length; index++) {
+    const previous = alignment.operations[index - 1];
+    const current = alignment.operations[index];
+
+    if (previous.type !== 'match' || current.type !== 'match') {
+      continue;
+    }
+
+    const typedSeparator = typedText.split(/\S+/)[current.typedIndex] ?? '';
+    const expectedSeparator = referenceText.split(/\S+/)[current.referenceIndex] ?? '';
+
+    if (typedSeparator !== expectedSeparator) {
+      mistakes++;
+      wrongCharsCount++;
+    }
+  }
+
+  return { ...alignment, mistakes, correctCharsCount, wrongCharsCount };
+}
+
 function updateLiveStats() {
-  const { accuracy, wrongCharsCount, adjustedWpm, typedLength } = calculateStats();
+  const { accuracy, mistakes, adjustedWpm, typedLength } = calculateStats();
   wpmValue.textContent = adjustedWpm.toFixed(1);
   accuracyValue.textContent = `${Math.min(100, accuracy).toFixed(1)}%`;
-  mistakesValue.textContent = String(wrongCharsCount);
+  mistakesValue.textContent = String(mistakes);
 
   if (typedLength === 0 && state.elapsedSeconds === 0) {
     wpmValue.textContent = '0.0';
@@ -138,48 +224,34 @@ function updateLiveStats() {
 }
 
 function renderComparison() {
-  const rows = getWordPairs(state.refText, typingInput.value);
+  const comparison = getComparison(state.refText, typingInput.value);
 
-  if (rows.length === 0) {
+  if (comparison.operations.length === 0) {
     comparisonList.innerHTML = '<div class="empty-state">No comparison available yet.</div>';
     return;
   }
 
-  comparisonList.innerHTML = rows
-    .map((row) => {
-      const expectedText = row.expected || '∅';
-      const actualText = row.actual || '∅';
-      const expectedClass = row.isCorrect ? 'correct' : 'wrong';
-      const actualClass = row.isCorrect ? 'correct' : 'wrong';
+  let paragraph = '';
+  comparison.operations.forEach((operation, index) => {
+    if (index > 0 && operation.actual) {
+      const previous = comparison.operations[index - 1];
+      const typedSeparator = typingInput.value.split(/\S+/)[operation.typedIndex] ?? ' ';
+      const expectedSeparator = state.refText.split(/\S+/)[operation.referenceIndex] ?? ' ';
+      paragraph += previous.type === 'match' && operation.type === 'match' && typedSeparator !== expectedSeparator
+        ? `<span class="comparison-wrong">${escapeHtml(typedSeparator || '[missing space]')}</span><span class="comparison-expected"> (${escapeHtml(expectedSeparator || '[space]')})</span>`
+        : escapeHtml(typedSeparator);
+    }
 
-      return `
-        <div class="word-row">
-          <strong>#${row.index}</strong>
-          <div class="word-box ${expectedClass}">${escapeHtml(expectedText)}</div>
-          <div class="word-box ${actualClass}">${escapeHtml(actualText)}</div>
-        </div>
-      `;
-    })
-    .join('');
-}
+    if (operation.type === 'match') {
+      paragraph += `<span class="comparison-correct">${escapeHtml(operation.actual)}</span>`;
+    } else if (operation.actual) {
+      paragraph += `<span class="comparison-wrong">${escapeHtml(operation.actual)}</span> <span class="comparison-expected">(${escapeHtml(operation.expected || '[nothing]')})</span>`;
+    } else {
+      paragraph += `<span class="comparison-wrong">[missing]</span> <span class="comparison-expected">(${escapeHtml(operation.expected)})</span>`;
+    }
+  });
 
-function renderWrongWords() {
-  const rows = getWordPairs(state.refText, typingInput.value).filter((row) => !row.isCorrect && (row.expected || row.actual));
-
-  if (rows.length === 0) {
-    wrongWordsList.innerHTML = '<div class="empty-state">No wrong words found. Great job.</div>';
-    return;
-  }
-
-  wrongWordsList.innerHTML = rows
-    .map((row) => `
-      <div class="word-row">
-        <strong>#${row.index}</strong>
-        <div class="word-box muted">Expected: ${escapeHtml(row.expected || 'blank')}</div>
-        <div class="word-box wrong">Typed: ${escapeHtml(row.actual || 'blank')}</div>
-      </div>
-    `)
-    .join('');
+  comparisonList.innerHTML = `<p class="comparison-paragraph">${paragraph}</p>`;
 }
 
 function escapeHtml(value) {
@@ -204,6 +276,7 @@ function startTest() {
   state.started = true;
   state.finished = false;
   state.elapsedSeconds = 0;
+  state.backspaceCount = 0;
   typingInput.value = '';
   typingInput.focus();
 
@@ -211,10 +284,7 @@ function startTest() {
   testPanel.classList.remove('hidden');
   resultPanel.classList.add('hidden');
 
-  timeValue.textContent = '00:00';
-  wpmValue.textContent = '0.0';
-  accuracyValue.textContent = '0%';
-  mistakesValue.textContent = '0';
+  timeValue.textContent = formatTime(TEST_DURATION_SECONDS);
 
   startTimer();
 }
@@ -233,10 +303,10 @@ function finishTest() {
   resultAccuracy.textContent = `${Math.min(100, accuracy).toFixed(1)}%`;
   correctChars.textContent = String(correctCharsCount);
   wrongChars.textContent = String(wrongCharsCount);
+  document.getElementById('backspaceCount').textContent = String(state.backspaceCount);
   resultTime.textContent = formatTime(state.elapsedSeconds);
 
   renderComparison();
-  renderWrongWords();
 
   testPanel.classList.add('hidden');
   resultPanel.classList.remove('hidden');
@@ -249,9 +319,10 @@ function resetPractice() {
   state.elapsedSeconds = 0;
   state.startTime = null;
   state.refText = '';
+  state.backspaceCount = 0;
   typingInput.value = '';
   referenceInput.value = '';
-  timeValue.textContent = '00:00';
+  timeValue.textContent = formatTime(TEST_DURATION_SECONDS);
   wpmValue.textContent = '0.0';
   accuracyValue.textContent = '0%';
   mistakesValue.textContent = '0';
@@ -261,7 +332,6 @@ function resetPractice() {
   setupPanel.classList.remove('hidden');
   referenceInput.focus();
   comparisonList.innerHTML = '';
-  wrongWordsList.innerHTML = '';
 }
 
 startBtn.addEventListener('click', startTest);
@@ -282,6 +352,10 @@ typingInput.addEventListener('input', () => {
 });
 
 typingInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Backspace') {
+    state.backspaceCount++;
+  }
+
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     finishTest();
