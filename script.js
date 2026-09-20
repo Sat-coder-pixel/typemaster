@@ -67,6 +67,14 @@ function getWords(text) {
   return [...text.matchAll(/\S+/g)].map((match) => match[0]);
 }
 
+function getSeparator(text, wordIndex) {
+  return text.split(/\S+/)[wordIndex] ?? '';
+}
+
+function normalizeSeparator(separator) {
+  return /[\r\n]/.test(separator) ? ' ' : separator;
+}
+
 function alignWords(referenceText, typedText) {
   const referenceWords = getWords(referenceText);
   const typedWords = getWords(typedText);
@@ -154,10 +162,12 @@ function calculateStats() {
   const referenceText = state.refText;
   const typedText = typingInput.value;
   const comparison = getComparison(referenceText, typedText);
-  const { correctCharsCount, mistakes } = comparison;
+  const { correctCharsCount, mistakes, typedWords } = comparison;
 
   const typedLength = typedText.length;
-  const accuracy = typedLength > 0 ? ((correctCharsCount / typedLength) * 100) : 0;
+  const correctWordsCount = comparison.operations.filter((operation) => operation.type === 'match').length;
+  const totalWords = Math.max(comparison.referenceWords.length, typedWords.length) + comparison.separatorMistakes;
+  const accuracy = totalWords > 0 ? ((correctWordsCount / totalWords) * 100) : 0;
   const elapsedMinutes = state.elapsedSeconds > 0 ? state.elapsedSeconds / 60 : 1 / 60;
   const grossWpm = typedLength > 0 ? (typedLength / 5) / elapsedMinutes : 0;
   const netWpm = correctCharsCount > 0 ? (correctCharsCount / 5) / elapsedMinutes : 0;
@@ -180,6 +190,7 @@ function getComparison(referenceText, typedText) {
   let mistakes = 0;
   let correctCharsCount = 0;
   let wrongCharsCount = 0;
+  let separatorMistakes = 0;
 
   alignment.operations.forEach((operation) => {
     if (operation.type === 'match') {
@@ -198,16 +209,17 @@ function getComparison(referenceText, typedText) {
       continue;
     }
 
-    const typedSeparator = typedText.split(/\S+/)[current.typedIndex] ?? '';
-    const expectedSeparator = referenceText.split(/\S+/)[current.referenceIndex] ?? '';
+    const typedSeparator = getSeparator(typedText, current.typedIndex);
+    const expectedSeparator = getSeparator(referenceText, current.referenceIndex);
 
-    if (typedSeparator !== expectedSeparator) {
+    if (normalizeSeparator(typedSeparator) !== normalizeSeparator(expectedSeparator)) {
       mistakes++;
       wrongCharsCount++;
+      separatorMistakes++;
     }
   }
 
-  return { ...alignment, mistakes, correctCharsCount, wrongCharsCount };
+  return { ...alignment, mistakes, correctCharsCount, wrongCharsCount, separatorMistakes };
 }
 
 function updateLiveStats() {
@@ -234,11 +246,11 @@ function renderComparison() {
   let paragraph = '';
   comparison.operations.forEach((operation, index) => {
     if (index > 0 && operation.actual) {
+      const typedSeparator = getSeparator(typingInput.value, operation.typedIndex) || ' ';
+      const expectedSeparator = getSeparator(state.refText, operation.referenceIndex) || ' ';
       const previous = comparison.operations[index - 1];
-      const typedSeparator = typingInput.value.split(/\S+/)[operation.typedIndex] ?? ' ';
-      const expectedSeparator = state.refText.split(/\S+/)[operation.referenceIndex] ?? ' ';
-      paragraph += previous.type === 'match' && operation.type === 'match' && typedSeparator !== expectedSeparator
-        ? `<span class="comparison-wrong">${escapeHtml(typedSeparator || '[missing space]')}</span><span class="comparison-expected"> (${escapeHtml(expectedSeparator || '[space]')})</span>`
+      paragraph += previous.type === 'match' && operation.type === 'match' && normalizeSeparator(typedSeparator) !== normalizeSeparator(expectedSeparator)
+        ? `<span class="comparison-wrong">${escapeHtml(typedSeparator)}</span><span class="comparison-expected"> (${escapeHtml(expectedSeparator)})</span>`
         : escapeHtml(typedSeparator);
     }
 
