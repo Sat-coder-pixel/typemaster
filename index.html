@@ -42,18 +42,18 @@
 
           <div class="stats-grid">
             <div class="stat-card">
-              <span class="label">Time</span>
+              <span class="label">Time remaining</span>
               <strong id="timeValue">00:00</strong>
             </div>
-            <div class="stat-card">
+            <div class="stat-card live-stat">
               <span class="label">Adjusted WPM</span>
               <strong id="wpmValue">0.0</strong>
             </div>
-            <div class="stat-card">
+            <div class="stat-card live-stat">
               <span class="label">Accuracy</span>
               <strong id="accuracyValue">0%</strong>
             </div>
-            <div class="stat-card">
+            <div class="stat-card live-stat">
               <span class="label">Mistakes</span>
               <strong id="mistakesValue">0</strong>
             </div>
@@ -93,8 +93,12 @@
               <strong id="correctChars">0</strong>
             </div>
             <div class="summary-card">
-              <span>Wrong chars</span>
+              <span>Mistakes</span>
               <strong id="wrongChars">0</strong>
+            </div>
+            <div class="summary-card">
+              <span>Backspaces</span>
+              <strong id="backspaceCount">0</strong>
             </div>
             <div class="summary-card">
               <span>Duration</span>
@@ -104,17 +108,12 @@
 
           <div class="score-note">
             <strong>How the score works:</strong>
-           AB Clerk ka bhi nahi hoga kya , kuch baski nahi hai.
+            Your adjusted WPM is intentionally kept a little lower than your real typing speed to give you a realistic improvement target. For example, if your true speed is 45 WPM, the app may show around 42 WPM to keep the score strict and motivating.
           </div>
 
           <div class="comparison-section">
-            <h3>Word comparison</h3>
+            <h3>Typing comparison</h3>
             <div id="comparisonList" class="comparison-list"></div>
-          </div>
-
-          <div class="mistake-section">
-            <h3>Wrong words</h3>
-            <div id="wrongWordsList" class="wrong-words-list"></div>
           </div>
         </section>
       </main>
