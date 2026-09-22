@@ -166,7 +166,14 @@ function calculateStats() {
 
   const typedLength = typedText.length;
   const correctWordsCount = comparison.operations.filter((operation) => operation.type === 'match').length;
-  const totalWords = Math.max(comparison.referenceWords.length, typedWords.length) + comparison.separatorMistakes;
+  const comparedWords = comparison.operations.reduce((total, operation) => {
+    if (operation.type === 'merge') {
+      return total + 2;
+    }
+
+    return total + 1;
+  }, 0);
+  const totalWords = comparedWords + comparison.separatorMistakes;
   const accuracy = totalWords > 0 ? ((correctWordsCount / totalWords) * 100) : 0;
   const elapsedMinutes = state.elapsedSeconds > 0 ? state.elapsedSeconds / 60 : 1 / 60;
   const grossWpm = typedLength > 0 ? (typedLength / 5) / elapsedMinutes : 0;
@@ -187,12 +194,18 @@ function calculateStats() {
 
 function getComparison(referenceText, typedText) {
   const alignment = alignWords(referenceText, typedText);
+  const operations = alignment.operations.slice();
+
+  while (operations.at(-1)?.type === 'omit') {
+    operations.pop();
+  }
+
   let mistakes = 0;
   let correctCharsCount = 0;
   let wrongCharsCount = 0;
   let separatorMistakes = 0;
 
-  alignment.operations.forEach((operation) => {
+  operations.forEach((operation) => {
     if (operation.type === 'match') {
       correctCharsCount += operation.actual.length;
     } else {
@@ -201,9 +214,9 @@ function getComparison(referenceText, typedText) {
     }
   });
 
-  for (let index = 1; index < alignment.operations.length; index++) {
-    const previous = alignment.operations[index - 1];
-    const current = alignment.operations[index];
+  for (let index = 1; index < operations.length; index++) {
+    const previous = operations[index - 1];
+    const current = operations[index];
 
     if (previous.type !== 'match' || current.type !== 'match') {
       continue;
@@ -219,7 +232,7 @@ function getComparison(referenceText, typedText) {
     }
   }
 
-  return { ...alignment, mistakes, correctCharsCount, wrongCharsCount, separatorMistakes };
+  return { ...alignment, operations, mistakes, correctCharsCount, wrongCharsCount, separatorMistakes };
 }
 
 function updateLiveStats() {
