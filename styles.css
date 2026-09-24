@@ -182,7 +182,7 @@ button:active {
 }
 
 .summary-grid {
-  grid-template-columns: repeat(6, minmax(110px, 1fr));
+  grid-template-columns: repeat(8, minmax(110px, 1fr));
 }
 
 .stat-card,
@@ -194,6 +194,19 @@ button:active {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.keystroke-summary {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.keystroke-summary span {
+  color: var(--warning);
+}
+
+.keystroke-summary strong {
+  color: #fde68a;
 }
 
 .live-stat {

@@ -15,6 +15,8 @@ const accuracyValue = document.getElementById('accuracyValue');
 const mistakesValue = document.getElementById('mistakesValue');
 
 const resultWpm = document.getElementById('resultWpm');
+const resultKeystrokeWpm = document.getElementById('resultKeystrokeWpm');
+const resultKeystrokes = document.getElementById('resultKeystrokes');
 const resultAccuracy = document.getElementById('resultAccuracy');
 const correctChars = document.getElementById('correctChars');
 const wrongChars = document.getElementById('wrongChars');
@@ -42,14 +44,15 @@ function formatTime(totalSeconds) {
 function startTimer() {
   state.startTime = Date.now();
   state.intervalId = setInterval(() => {
-    state.elapsedSeconds = Math.max(0, Math.floor((Date.now() - state.startTime) / 1000));
-    const remainingSeconds = Math.max(0, TEST_DURATION_SECONDS - state.elapsedSeconds);
+    const preciseElapsed = (Date.now() - state.startTime) / 1000;
+    state.elapsedSeconds = Math.max(0, preciseElapsed);
+    const remainingSeconds = Math.max(0, TEST_DURATION_SECONDS - Math.floor(state.elapsedSeconds));
     timeValue.textContent = formatTime(remainingSeconds);
 
     if (remainingSeconds === 0) {
       finishTest();
     }
-  }, 250);
+  }, 100);
 }
 
 function stopTimer() {
@@ -158,40 +161,6 @@ function getAdjustedWpm(realWpm) {
   return Math.max(0, realWpm - 3);
 }
 
-function calculateStats() {
-  const referenceText = state.refText;
-  const typedText = typingInput.value;
-  const comparison = getComparison(referenceText, typedText);
-  const { correctCharsCount, mistakes, typedWords } = comparison;
-
-  const typedLength = typedText.length;
-  const correctWordsCount = comparison.operations.filter((operation) => operation.type === 'match').length;
-  const comparedWords = comparison.operations.reduce((total, operation) => {
-    if (operation.type === 'merge') {
-      return total + 2;
-    }
-
-    return total + 1;
-  }, 0);
-  const totalWords = comparedWords + comparison.separatorMistakes;
-  const accuracy = totalWords > 0 ? ((correctWordsCount / totalWords) * 100) : 0;
-  const elapsedMinutes = state.elapsedSeconds > 0 ? state.elapsedSeconds / 60 : 1 / 60;
-  const grossWpm = typedLength > 0 ? (typedLength / 5) / elapsedMinutes : 0;
-  const netWpm = correctCharsCount > 0 ? (correctCharsCount / 5) / elapsedMinutes : 0;
-  const adjustedWpm = getAdjustedWpm(netWpm);
-
-  return {
-    correctCharsCount,
-    wrongCharsCount: mistakes,
-    accuracy,
-    grossWpm,
-    netWpm,
-    adjustedWpm,
-    mistakes,
-    typedLength,
-  };
-}
-
 function getComparison(referenceText, typedText) {
   const alignment = alignWords(referenceText, typedText);
   const operations = alignment.operations.slice();
@@ -218,21 +187,58 @@ function getComparison(referenceText, typedText) {
     const previous = operations[index - 1];
     const current = operations[index];
 
-    if (previous.type !== 'match' || current.type !== 'match') {
-      continue;
-    }
+    if (previous.type === 'match' && current.type === 'match') {
+      const typedSeparator = getSeparator(typedText, current.typedIndex);
+      const expectedSeparator = getSeparator(referenceText, current.referenceIndex);
 
-    const typedSeparator = getSeparator(typedText, current.typedIndex);
-    const expectedSeparator = getSeparator(referenceText, current.referenceIndex);
-
-    if (normalizeSeparator(typedSeparator) !== normalizeSeparator(expectedSeparator)) {
-      mistakes++;
-      wrongCharsCount++;
-      separatorMistakes++;
+      if (normalizeSeparator(typedSeparator) === normalizeSeparator(expectedSeparator)) {
+        correctCharsCount += typedSeparator.length;
+      } else {
+        mistakes++;
+        wrongCharsCount += typedSeparator.length;
+        separatorMistakes++;
+      }
     }
   }
 
   return { ...alignment, operations, mistakes, correctCharsCount, wrongCharsCount, separatorMistakes };
+}
+
+function calculateStats() {
+  const referenceText = state.refText;
+  const typedText = typingInput.value;
+  const comparison = getComparison(referenceText, typedText);
+  const { correctCharsCount, mistakes } = comparison;
+
+  const typedLength = typedText.length;
+  const totalKeystrokes = typedLength;
+  
+  // Character-level accuracy: valid characters divided by total typed characters
+  const accuracy = totalKeystrokes > 0 ? ((correctCharsCount / totalKeystrokes) * 100) : 0;
+  
+  const elapsedMinutes = state.elapsedSeconds > 0 ? state.elapsedSeconds / 60 : 1 / 60;
+  const grossWpm = typedLength > 0 ? (typedLength / 5) / elapsedMinutes : 0;
+  
+  // Strict Net WPM based on valid matched characters
+  const netWpm = correctCharsCount > 0 ? (correctCharsCount / 5) / elapsedMinutes : 0;
+  const adjustedWpm = getAdjustedWpm(netWpm);
+  
+  // Keystroke WPM strictly uses valid keystrokes to avoid inflating speed stats
+  const countedKeystrokes = correctCharsCount;
+  const keystrokeWpm = countedKeystrokes > 0 ? (countedKeystrokes / 5) / elapsedMinutes : 0;
+
+  return {
+    correctCharsCount,
+    wrongCharsCount: comparison.wrongCharsCount,
+    accuracy,
+    grossWpm,
+    netWpm,
+    adjustedWpm,
+    keystrokeWpm,
+    countedKeystrokes,
+    mistakes,
+    typedLength,
+  };
 }
 
 function updateLiveStats() {
@@ -322,14 +328,16 @@ function finishTest() {
   state.finished = true;
   stopTimer();
 
-  const { correctCharsCount, wrongCharsCount, accuracy, adjustedWpm } = calculateStats();
+  const { correctCharsCount, wrongCharsCount, accuracy, adjustedWpm, keystrokeWpm, countedKeystrokes } = calculateStats();
 
   resultWpm.textContent = adjustedWpm.toFixed(1);
+  resultKeystrokeWpm.textContent = keystrokeWpm.toFixed(1);
+  resultKeystrokes.textContent = String(countedKeystrokes);
   resultAccuracy.textContent = `${Math.min(100, accuracy).toFixed(1)}%`;
   correctChars.textContent = String(correctCharsCount);
   wrongChars.textContent = String(wrongCharsCount);
   document.getElementById('backspaceCount').textContent = String(state.backspaceCount);
-  resultTime.textContent = formatTime(state.elapsedSeconds);
+  resultTime.textContent = formatTime(Math.floor(state.elapsedSeconds));
 
   renderComparison();
 
